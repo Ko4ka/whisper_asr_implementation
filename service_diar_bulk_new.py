@@ -23,7 +23,7 @@ warnings.filterwarnings("ignore", category=ReproducibilityWarning)
 
 # Config
 MAX_FILES_PER_REQUEST = 25  # Maximum number of files per request
-CONCURRENT_PROCESSES = 2  # Number of concurrent diarizations - about 1.8 GB per stream
+CONCURRENT_PROCESSES = 1  # Number of concurrent diarizations - about 1.8 GB per stream
 
 # Diarization Pipeline
 pipeline = Pipeline.from_pretrained(
@@ -79,7 +79,7 @@ async def save_upload_file_tmp(upload_file: UploadFile) -> str:
 
 @app.post("/diarize_audio_bulk")
 async def diarize_audio(files: List[UploadFile] = File(...),
-                        num_speakers: Optional[int] = Form(None)):
+                        num_speakers: Optional[List[Optional[int]]] = Form(None)):
     """
     API endpoint to diarize multiple audio files concurrently.
     """
@@ -97,18 +97,21 @@ async def diarize_audio(files: List[UploadFile] = File(...),
 
         loop = asyncio.get_event_loop()
         tasks = []
-        for tmp_file, filename in zip(tmp_files, filenames):
-            # Schedule diarize_file_process to run in ProcessPoolExecutor
-            task = loop.run_in_executor(executor, diarize_file_process, tmp_file, filename, num_speakers)
+        # Iterate over files and pass the corresponding num_speakers (if provided)
+        for idx, (tmp_file, filename) in enumerate(zip(tmp_files, filenames)):
+            current_num_speakers = None
+            if num_speakers is not None and len(num_speakers) > idx:
+                current_num_speakers = num_speakers[idx]
+            task = loop.run_in_executor(
+                executor, diarize_file_process, tmp_file, filename, current_num_speakers
+            )
             tasks.append(task)
 
         # Wait for all tasks to complete
         results = await asyncio.gather(*tasks)
 
         # Map filenames to results
-        output = {}
-        for filename, diarization in results:
-            output[filename] = diarization
+        output = {filename: result for filename, result in results}
 
         # Clean up temporary files
         for tmp_file in tmp_files:
@@ -118,6 +121,63 @@ async def diarize_audio(files: List[UploadFile] = File(...),
     except Exception as e:
         traceback.print_exc()
         return e
+    
+@app.post("/diarize_audio_bulk_local")
+async def diarize_audio_bulk_local(
+    paths: List[str], 
+    num_speakers: Optional[int] = None  # Note: if you want per-file values, consider using Optional[List[int]]
+):
+    """
+    Accepts a list of local audio file paths and optionally num_speakers.
+    Diarizes the audio using the same pipeline as /diarize_audio_bulk.
+    """
+    print("Received paths:", paths)
+    print("Received num_speakers:", num_speakers)
+    
+    # 1. Validate number of paths
+    if len(paths) > MAX_FILES_PER_REQUEST:
+        err_msg = f"Maximum of {MAX_FILES_PER_REQUEST} files allowed."
+        print(err_msg)
+        raise HTTPException(status_code=400, detail=err_msg)
+
+    # 2. Validate that each path exists
+    for path in paths:
+        print("Validating path:", path)
+        if not os.path.isfile(path):
+            err_msg = f"File does not exist or is not accessible: {path}"
+            print(err_msg)
+            raise HTTPException(status_code=400, detail=err_msg)
+    
+    # 3. Create concurrency tasks
+    loop = asyncio.get_event_loop()
+    tasks = []
+    for idx, path in enumerate(paths):
+        filename = os.path.basename(path)
+        # If num_speakers is provided as a single int, use it for all files.
+        # If you plan to provide a list of speaker counts per file, adjust the type accordingly.
+        current_num_speakers = num_speakers
+        print(f"Creating task for file {idx}:")
+        print(f"  Path: {path}")
+        print(f"  Filename: {filename}")
+        print(f"  num_speakers: {current_num_speakers}")
+        task = loop.run_in_executor(
+            executor, 
+            diarize_file_process, 
+            path, 
+            filename, 
+            current_num_speakers
+        )
+        tasks.append(task)
+    
+    # 4. Run all tasks concurrently
+    print("Running diarization tasks concurrently...")
+    results = await asyncio.gather(*tasks)
+    print("Diarization tasks completed. Raw results:", results)
+    
+    # 5. Build output as { filename: <diarization or error> }
+    output = {filename: result for filename, result in results}
+    print("Returning output:", output)
+    return output
 
 
 # Create a ProcessPoolExecutor with a limited number of processes
