@@ -54,7 +54,8 @@ def get_in_queue_jobs(db_path=DATABASE) -> List[Dict[str, Any]]:
         "status",
         "transcription",
         "transcribed_at",
-        "time_taken"
+        "time_taken",
+        "length"
     ]
     try:
         cursor.execute("SELECT * FROM jobs WHERE status = 'in queue'")
@@ -108,7 +109,8 @@ def update_job_in_db(job: dict, db_path=DATABASE) -> None:
         status = ?,
         transcription = ?,
         transcribed_at = ?,
-        time_taken = ?
+        time_taken = ?,
+        length = ?
     WHERE job_id = ?
     """
     cursor.execute(
@@ -118,7 +120,8 @@ def update_job_in_db(job: dict, db_path=DATABASE) -> None:
             job.get("status"),          
             transcription_data,         
             job.get("transcribed_at"),  
-            job.get("time_taken"),      
+            job.get("time_taken"),
+            job.get("length"),      
             job["job_id"],
         )
     )
@@ -150,6 +153,20 @@ def convert_to_mono_wav(input_path: str, output_path: str) -> None:
         subprocess.run(command, check=True)
         if not os.path.exists(output_path):
             raise RuntimeError("Conversion failed; output file not created.")
+        
+        # ─── get duration with ffprobe ───
+        probe_cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            output_path
+        ]
+        res = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        duration_secs = float(res.stdout.strip())
+        return int(duration_secs)
+        # ───────────────────────────────────
+
     except Exception as e:
         print("[convert_to_mono_wav] Error:", e)
         traceback.print_exc()
@@ -242,21 +259,27 @@ async def process_job(job: Dict[str, Any]) -> Dict[str, Any]:
 
         # Convert to mono WAV
         converted_paths = []
+        durations = []
         for orig_path in orig_file_paths:
             tmp_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
             tmp_wav_path = tmp_wav.name
             tmp_wav.close()
             print(f"[process_job] Converting {orig_path} -> {tmp_wav_path}")
             try:
-                convert_to_mono_wav(orig_path, tmp_wav_path)
+                dur = convert_to_mono_wav(orig_path, tmp_wav_path)
                 converted_paths.append(tmp_wav_path)
                 temp_files.append(tmp_wav_path)
+                durations.append(dur)
             except Exception as conv_err:
                 print(f"[process_job] job_id={job_id}, conversion failed: {conv_err}")
 
         if not converted_paths:
             raise RuntimeError("No files were successfully converted.")
         print(f"[process_job] job_id={job_id}, converted_paths={converted_paths}")
+        
+        # ─── sum up durations and store in job dict ───
+        job["length"] = sum(durations)
+        print(f"[process_job] job_id={job_id}, total audio length={job['length']}s")
 
         source_data = job.get("source_data", {})
         params = {}

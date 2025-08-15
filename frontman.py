@@ -177,14 +177,14 @@ def get_transcription(job_id: int):
         print(f"[get_transcription] Connected to database '{DATABASE}' successfully.")
 
         # 1) Query the job by job_id for the 'transcription' column
-        cursor.execute("SELECT transcription FROM jobs WHERE job_id = ?", (job_id,))
+        cursor.execute("SELECT transcription, length FROM jobs WHERE job_id = ?", (job_id,))
         row = cursor.fetchone()
         
         if row is None:
             print(f"[get_transcription] No job found for job_id={job_id}")
             raise HTTPException(status_code=404, detail="Job not found")
         
-        transcription_str = row[0]  # The 'transcription' from the row (JSON text)
+        transcription_str, length_val = row  # JSON text + integer seconds
 
         if not transcription_str:
             print(f"[get_transcription] No transcription found for job_id={job_id}")
@@ -212,5 +212,6 @@ def get_transcription(job_id: int):
 
     # 3) Return the transcription as JSON
     return {
-        "transcription": transcription_data
+        "transcription": transcription_data,
+        "length": length_val
     }
