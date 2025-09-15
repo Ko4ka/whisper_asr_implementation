@@ -25,8 +25,8 @@ ASR_TIMEOUT = 600.0   # Timeout in seconds for ASR requests
 DIAR_TIMEOUT = 120.0   # Timeout in seconds for diarization requests
 
 # Audio post-processing constants
-MAX_SPEECH_BUBBLE = 15.0
-PAUSE_THRESHOLD = 1.0
+MAX_SPEECH_BUBBLE = 20.0
+PAUSE_THRESHOLD = 2.0
 
 # ASR settings
 DEFAULT_LANGUAGE = None
