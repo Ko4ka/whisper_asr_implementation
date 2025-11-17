@@ -26,8 +26,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Post-processing knobs
 GAP_STITCH_SEC       = 0.50          # merge adjacent same-speaker segments with gaps ≤ this
 MIN_TURN_SEC         = 0.50          # drop/merge turns shorter than this when possible
-MIN_CLUSTER_SEC      = 3.0           # absorb speakers whose total duration < this
-MIN_CLUSTER_RATIO    = 0.01          # or < 1% of file duration
+MIN_CLUSTER_SEC      = 4.0           # absorb speakers whose total duration < this
+MIN_CLUSTER_RATIO    = 0.005          # or < 1% of file duration
 SAD_MIN_HANGOVER_SEC = 0.35          # request SAD min_duration_on/off (may be ignored if unsupported)
 
 # HuggingFace token (prefer env variable)

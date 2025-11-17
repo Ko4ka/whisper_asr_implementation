@@ -21,8 +21,8 @@ DIAR_URL = "http://127.0.0.1:8001/diarize_audio_bulk_local"
 PROCESS_URL = "http://127.0.0.1:8002/process-transcription"
 
 # Timeouts
-ASR_TIMEOUT = 600.0   # Timeout in seconds for ASR requests
-DIAR_TIMEOUT = 120.0   # Timeout in seconds for diarization requests
+ASR_TIMEOUT = 1080.0   # Timeout in seconds for ASR requests
+DIAR_TIMEOUT = 380.0   # Timeout in seconds for diarization requests
 
 # Audio post-processing constants
 MAX_SPEECH_BUBBLE = 20.0
