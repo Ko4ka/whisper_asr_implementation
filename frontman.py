@@ -41,7 +41,7 @@ def job_status(job_id: int):
         print(f"[job_status] Connected to database '{DATABASE}' successfully")
 
         # Query the job by job_id
-        cursor.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,))
+        cursor.execute("SELECT status, eta FROM jobs WHERE job_id = ?", (job_id,))
         row = cursor.fetchone()
         
         if row is None:
@@ -52,6 +52,9 @@ def job_status(job_id: int):
         if status is None:
             print(f"[job_status] Job found but 'status' is NULL for job_id={job_id}")
             raise HTTPException(status_code=404, detail="No status available for this job")
+        
+        # Extract eta, return empty string if None
+        eta = row[1] if row[1] else ""
         
         # 2. Get the total number of rows that have "in queue" status
         cursor.execute(
@@ -66,7 +69,7 @@ def job_status(job_id: int):
         count_in_queue = cursor.fetchone()
         queue_count = count_in_queue[0] if count_in_queue else 0
 
-        print(f"[job_status] job_id={job_id}, status='{status}', queue_count={queue_count}")
+        print(f"[job_status] job_id={job_id}, status='{status}', queue_count={queue_count}, eta='{eta}'")
     except sqlite3.Error as e:
         msg = f"[job_status] Database error: {str(e)}"
         print(msg)
@@ -76,7 +79,7 @@ def job_status(job_id: int):
         print("[job_status] Database connection closed")
 
     # Return the status in a JSON object
-    return {"status": status, "queue": queue_count}
+    return {"status": status, "queue": queue_count, "eta": eta}
 
 @app.post("/add_job", response_model=JobResponse)
 def create_job(job: JobCreate):
