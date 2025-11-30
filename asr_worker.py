@@ -482,19 +482,31 @@ async def process_job(job: Dict[str, Any]) -> Dict[str, Any]:
 
         # Process ASR response
         print(f"[process_job] job_id={job_id}, asr_response.status={asr_response.status_code}")
+        if asr_response.status_code != 200:
+            print(f"[process_job] job_id={job_id}, ASR response text: {asr_response.text}")
+            print(f"[process_job] job_id={job_id}, ASR response headers: {asr_response.headers}")
         try:
             asr_data = asr_response.json()
+            print(f"[process_job] job_id={job_id}, asr_data keys: {list(asr_data.keys()) if isinstance(asr_data, dict) else 'not a dict'}")
+            print(f"[process_job] job_id={job_id}, asr_data type: {type(asr_data)}, asr_data: {asr_data}")
         except Exception as e:
             print(f"[process_job] job_id={job_id}, error decoding ASR response: {e}")
+            print(f"[process_job] job_id={job_id}, ASR response text (raw): {asr_response.text}")
             asr_data = {}
 
         # Process diarization response
         if diar_response:
             print(f"[process_job] job_id={job_id}, diar_response.status={diar_response.status_code}")
+            if diar_response.status_code != 200:
+                print(f"[process_job] job_id={job_id}, diarization response text: {diar_response.text}")
+                print(f"[process_job] job_id={job_id}, diarization response headers: {diar_response.headers}")
             try:
                 diarization_data = diar_response.json()
+                print(f"[process_job] job_id={job_id}, diarization_data keys: {list(diarization_data.keys()) if isinstance(diarization_data, dict) else 'not a dict'}")
+                print(f"[process_job] job_id={job_id}, diarization_data type: {type(diarization_data)}, diarization_data: {diarization_data}")
             except Exception as e:
                 print(f"[process_job] job_id={job_id}, error decoding diar response: {e}")
+                print(f"[process_job] job_id={job_id}, diarization response text (raw): {diar_response.text}")
                 diarization_data = {}
         else:
             diarization_data = {}
@@ -502,6 +514,8 @@ async def process_job(job: Dict[str, Any]) -> Dict[str, Any]:
         # If diarization is used, call process-transcription
         if source_data.get("diarization"):
             print(f"[process_job] job_id={job_id}, merging ASR+diarization.")
+            print(f"[process_job] job_id={job_id}, asr_data before merge check: {asr_data}")
+            print(f"[process_job] job_id={job_id}, asr_data type: {type(asr_data)}, is dict: {isinstance(asr_data, dict)}, is empty: {not asr_data if isinstance(asr_data, dict) else 'N/A'}")
             process_payload = {
                 "transcription": None,
                 "diarization": None
@@ -511,6 +525,7 @@ async def process_job(job: Dict[str, Any]) -> Dict[str, Any]:
                 first_key_asr = list(asr_data.keys())[0]
                 process_payload["transcription"] = asr_data[first_key_asr]
             else:
+                print(f"[process_job] job_id={job_id}, ERROR: ASR data is invalid. asr_data={asr_data}, type={type(asr_data)}")
                 raise ValueError("ASR data must contain at least one key with segments.")
             
             if isinstance(diarization_data, dict) and diarization_data:
