@@ -28,6 +28,11 @@ app = FastAPI()
 def health():
     return {"status": "ok"}
 
+def log_bad_request(endpoint: str, reason: str, **context):
+    print(f"{datetime.now()} - [400] {endpoint}: {reason}")
+    for key, value in context.items():
+        print(f"{datetime.now()} - [400] {endpoint}: {key}={value}")
+
 # Suppress specific warnings if needed
 if IGNORE_WIN_WARNINGS:
     warnings.filterwarnings(
@@ -203,6 +208,13 @@ async def transcribe_audio(
     files: List[UploadFile] = File(...),
 ):
     if len(files) > MAX_FILES_PER_REQUEST:
+        log_bad_request(
+            "/transcribe_audio_bulk",
+            "too many uploaded files",
+            file_count=len(files),
+            max_files=MAX_FILES_PER_REQUEST,
+            languages=languages,
+        )
         raise HTTPException(status_code=400, detail=f"Maximum of {MAX_FILES_PER_REQUEST} files allowed.")
 
     # Split the languages string into a list if provided, otherwise default to "auto" for each file.
@@ -211,6 +223,13 @@ async def transcribe_audio(
     else:
         languages_list = [lang.strip() for lang in languages.split(",")]
         if len(languages_list) != len(files):
+            log_bad_request(
+                "/transcribe_audio_bulk",
+                "language count does not match uploaded file count",
+                file_count=len(files),
+                language_count=len(languages_list),
+                languages=languages,
+            )
             raise HTTPException(status_code=400, detail="The number of languages provided must match the number of files.")
 
     tmp_files = []
@@ -251,6 +270,15 @@ async def transcribe_audio_local(
     using the same chunk-based approach as /transcribe_audio_bulk.
     """
     if paths is None or len(paths) > MAX_FILES_PER_REQUEST:
+        log_bad_request(
+            "/transcribe_audio_local",
+            "missing paths or too many paths",
+            paths=paths,
+            path_count=(len(paths) if paths is not None else None),
+            max_files=MAX_FILES_PER_REQUEST,
+            languages=languages,
+            cwd=os.getcwd(),
+        )
         raise HTTPException(
             status_code=400,
             detail=f"Maximum of {MAX_FILES_PER_REQUEST} files allowed."
@@ -261,10 +289,28 @@ async def transcribe_audio_local(
     else:
         languages_list = [lang.strip() for lang in languages.split(",")]
         if len(languages_list) != len(paths):
+            log_bad_request(
+                "/transcribe_audio_local",
+                "language count does not match path count",
+                paths=paths,
+                path_count=len(paths),
+                language_count=len(languages_list),
+                languages=languages,
+                cwd=os.getcwd(),
+            )
             raise HTTPException(status_code=400, detail="The number of languages provided must match the number of paths.")
 
     for path in paths:
         if not os.path.isfile(path):
+            log_bad_request(
+                "/transcribe_audio_local",
+                "file does not exist or is not readable from this ASR process",
+                missing_path=path,
+                paths=paths,
+                exists=os.path.exists(path),
+                is_file=os.path.isfile(path),
+                cwd=os.getcwd(),
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"File does not exist: {path}"
