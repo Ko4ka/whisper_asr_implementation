@@ -25,7 +25,7 @@ from datetime import datetime
 CHUNK_DURATION = 120
 IGNORE_WIN_WARNINGS = True
 MAX_FILES_PER_REQUEST = 25  # Maximum number of files per request
-CONCURRENT_TRANSCRIPTIONS = 2  # It takes about 6GB per instance on Windows, maybe better on Linux
+CONCURRENT_TRANSCRIPTIONS = 1  # It takes about 6GB per instance on Windows, maybe better on Linux
 HALLUCINATION_COMPRESSION = 4.1  # 2.1
 NO_SPEECH = 0.7  # 0.3
 FP16 = False  # True

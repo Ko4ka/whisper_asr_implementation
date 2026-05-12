@@ -28,6 +28,10 @@ class JobResponse(BaseModel):
 app = FastAPI()
 DATABASE = "./Drafts/asr_queue.db"
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 @app.get("/job_status/{job_id}")
 def job_status(job_id: int):
     """

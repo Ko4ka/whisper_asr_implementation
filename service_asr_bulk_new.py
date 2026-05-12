@@ -13,15 +13,20 @@ from datetime import datetime
 # import ffmpeg
 
 # Config
-CHUNK_DURATION = 120
+CHUNK_DURATION = 180
 IGNORE_WIN_WARNINGS = True
 MAX_FILES_PER_REQUEST = 25  # Maximum number of files per request
 CONCURRENT_TRANSCRIPTIONS = 2  # It takes about 6GB per instance on Windows, maybe better on Linux
 HALLUCINATION_COMPRESSION = 4.1  # 2.1
-NO_SPEECH = 0.7  # 0.3
+NO_SPEECH = 0.65  # 0.3
 FP16 = False  # True
 
 app = FastAPI()
+
+# Lightweight liveness probe
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 # Suppress specific warnings if needed
 if IGNORE_WIN_WARNINGS:

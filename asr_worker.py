@@ -21,8 +21,8 @@ DIAR_URL = "http://127.0.0.1:8001/diarize_audio_bulk_local"
 PROCESS_URL = "http://127.0.0.1:8002/process-transcription"
 
 # Timeouts
-ASR_TIMEOUT = 1080.0   # Timeout in seconds for ASR requests
-DIAR_TIMEOUT = 380.0   # Timeout in seconds for diarization requests
+ASR_TIMEOUT = 1800.0   # Timeout in seconds for ASR requests
+DIAR_TIMEOUT = 600.0   # Timeout in seconds for diarization requests
 
 # Audio post-processing constants
 MAX_SPEECH_BUBBLE = 20.0
@@ -488,7 +488,7 @@ async def process_job(job: Dict[str, Any]) -> Dict[str, Any]:
         try:
             asr_data = asr_response.json()
             print(f"[process_job] job_id={job_id}, asr_data keys: {list(asr_data.keys()) if isinstance(asr_data, dict) else 'not a dict'}")
-            print(f"[process_job] job_id={job_id}, asr_data type: {type(asr_data)}, asr_data: {asr_data}")
+            #print(f"[process_job] job_id={job_id}, asr_data type: {type(asr_data)}, asr_data: {asr_data}")
         except Exception as e:
             print(f"[process_job] job_id={job_id}, error decoding ASR response: {e}")
             print(f"[process_job] job_id={job_id}, ASR response text (raw): {asr_response.text}")

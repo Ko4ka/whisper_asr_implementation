@@ -245,6 +245,11 @@ def diarize_file_process(file_path: str, file_name: str, num_speakers: Optional[
 # -------------------- FastAPI --------------------
 app = FastAPI()
 
+# Lightweight liveness probe
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 async def save_upload_file_tmp(upload_file: UploadFile) -> str:
     try:
         contents = await upload_file.read()

@@ -12,6 +12,10 @@ PAUSE_THRESHOLD = 1
 # Initialize FastAPI
 app = FastAPI()
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 '''def align_transcription_with_diarization(transcription, diarization, overlap_threshold=0.1):
     """
     Aligns transcription words with diarization segments, ensuring each word is
