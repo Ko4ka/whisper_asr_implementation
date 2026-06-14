@@ -16,13 +16,15 @@ import httpx
 # GLOBAL CONSTANTS & CONFIG
 # ---------------------------------------------------------------------------
 DATABASE = "./Drafts/asr_queue.db"        # Path to your SQLite database
+#ASR_URL = "http://192.168.1.22:8000/transcribe_audio_local"
 ASR_URL = "http://127.0.0.1:8000/transcribe_audio_local"
 DIAR_URL = "http://127.0.0.1:8001/diarize_audio_bulk_local"
 PROCESS_URL = "http://127.0.0.1:8002/process-transcription"
+TEMP_LOCATION = r"\\192.168.1.10\asr-temp"
 
 # Timeouts
 ASR_TIMEOUT = 1800.0   # Timeout in seconds for ASR requests
-DIAR_TIMEOUT = 600.0   # Timeout in seconds for diarization requests
+DIAR_TIMEOUT = 1800.0   # Timeout in seconds for diarization requests
 
 # Audio post-processing constants
 MAX_SPEECH_BUBBLE = 20.0
@@ -36,6 +38,7 @@ NUM_ASR_THREADS = 2  # for correct ETA calculation
 # Where Y = processing time in seconds, X = audio length in seconds
 ETA_INTERCEPT = 3.5473
 ETA_SLOPE = 0.06228
+ETA_FACTOR = 1.65
 
 # ---------------------------------------------------------------------------
 # ETA CALCULATION FUNCTIONS
@@ -47,7 +50,7 @@ def estimate_processing_seconds(audio_length_s: float) -> float:
     Formula: Ŷ = 3.5473 + 0.06228X
     Where Y = processing time in seconds, X = audio length in seconds
     """
-    return max(0.0, ETA_INTERCEPT + ETA_SLOPE * audio_length_s)
+    return max(0.0, ETA_INTERCEPT + ETA_SLOPE * audio_length_s * ETA_FACTOR)
 
 def calculate_queue_aware_etas(
     jobs: List[Dict[str, Any]], 
@@ -291,6 +294,43 @@ def update_job_in_db(job: dict, db_path=DATABASE) -> None:
     conn.close()
     print(f"[update_job_in_db] Finished updating job_id={job['job_id']}.")
 
+def reserve_job_slot(job: Dict[str, Any], db_path=DATABASE) -> None:
+    """
+    Mark a queued job as occupying an ASR slot before launching its async task.
+    This makes the concurrency limit visible to clients immediately.
+    """
+    job["status"] = "transcribing"
+    audio_length = job.get("length") or 0
+    if audio_length > 0:
+        eta_seconds = estimate_processing_seconds(audio_length)
+        completion_time = datetime.datetime.now() + datetime.timedelta(seconds=eta_seconds)
+        job["eta"] = completion_time.strftime("%Y-%m-%d %H:%M:%S")
+    update_job_in_db(job, db_path)
+    print(f"[reserve_job_slot] Reserved ASR slot for job_id={job['job_id']}.")
+
+def reset_transcribing_jobs(db_path=DATABASE) -> None:
+    """
+    On worker startup, clear jobs left in 'transcribing' by a previous run.
+    They are not attached to any in-memory task anymore, so they must re-enter
+    the queue instead of occupying a phantom slot forever.
+    """
+    print("[reset_transcribing_jobs] Resetting stale transcribing jobs, if any.")
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE jobs
+        SET status = 'in queue',
+            eta = NULL
+        WHERE status = 'transcribing'
+        """
+    )
+    reset_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if reset_count:
+        print(f"[reset_transcribing_jobs] Reset {reset_count} stale job(s) to 'in queue'.")
+
 # ---------------------------------------------------------------------------
 # AUDIO / ASR UTILITIES
 # ---------------------------------------------------------------------------
@@ -422,8 +462,9 @@ async def process_job(job: Dict[str, Any]) -> Dict[str, Any]:
         # Convert to mono WAV
         converted_paths = []
         durations = []
+        os.makedirs(TEMP_LOCATION, exist_ok=True)
         for orig_path in orig_file_paths:
-            tmp_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            tmp_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav", dir=TEMP_LOCATION)
             tmp_wav_path = tmp_wav.name
             tmp_wav.close()
             print(f"[process_job] Converting {orig_path} -> {tmp_wav_path}")
@@ -602,13 +643,36 @@ async def main_loop(interval: float = 10.0):
     Also updates ETAs for jobs in queue and currently transcribing jobs.
     """
     print("[main_loop] Starting ASR worker loop.")
+    reset_transcribing_jobs(DATABASE)
+    active_tasks: Dict[asyncio.Task, str] = {}
+
     while True:
         try:
+            # 0) Reap finished tasks first so any freed slot can be reused this cycle.
+            completed_tasks = [task for task in active_tasks if task.done()]
+            for task in completed_tasks:
+                job_id = active_tasks.pop(task)
+                try:
+                    job_dict = task.result()
+                    update_job_in_db(job_dict, DATABASE)
+                    print(f"[main_loop] Completed job_id={job_id}.")
+                except Exception as task_err:
+                    print(f"[main_loop] Task failed for job_id={job_id}: {task_err}")
+                    traceback.print_exc()
+
             # 1) Fetch in-queue jobs
             in_queue_jobs = get_in_queue_jobs(DATABASE)
             
             # 2) Fetch currently transcribing jobs
             transcribing_jobs = get_transcribing_jobs(DATABASE)
+            active_job_ids = set(active_tasks.values())
+            orphaned_transcribing_jobs = [
+                j for j in transcribing_jobs
+                if str(j.get("job_id")) not in active_job_ids
+            ]
+            if orphaned_transcribing_jobs:
+                orphaned_ids = [j.get("job_id") for j in orphaned_transcribing_jobs]
+                print(f"[main_loop] DB has transcribing job(s) not owned by this worker: {orphaned_ids}")
             
             # 3) Calculate ETAs for in-queue jobs (queue-aware)
             # First, we need to get audio lengths for jobs that don't have them yet
@@ -624,24 +688,35 @@ async def main_loop(interval: float = 10.0):
                         print(f"[main_loop] Updated ETA for job_id={job['job_id']}: {job['eta']}")
 
             # 4) Filter jobs to process (mono or mono-stereo format)
-            filtered_jobs = [j for j in in_queue_jobs if j.get('source_data', {}).get('format') in ('mono', 'mono-stereo')]
-            # Limit to NUM_ASR_THREADS to respect concurrency
-            available_slots = NUM_ASR_THREADS - len(transcribing_jobs)
+            filtered_jobs = [
+                j for j in in_queue_jobs
+                if j.get('source_data', {}).get('format') in ('mono', 'mono-stereo')
+                and str(j.get("job_id")) not in active_job_ids
+            ]
+            # Keep a rolling pool: newly completed jobs free slots immediately.
+            # The rolling pool is controlled by this process' active tasks. DB rows
+            # can be stale after a worker restart, so they should not reduce capacity.
+            used_slots = len(active_tasks)
+            available_slots = max(0, NUM_ASR_THREADS - used_slots)
             if available_slots > 0:
                 filtered_jobs = filtered_jobs[:available_slots]
+            else:
+                filtered_jobs = []
 
             if filtered_jobs:
                 print(f"[main_loop] Found {len(filtered_jobs)} job(s) to process (available slots: {available_slots}).")
-                # 5) Process them
-                final_results = await process_jobs(filtered_jobs)
-                # 6) Update DB (process_job already updates status to transcribing, but we update again for final status)
-                for job_dict in final_results:
-                    update_job_in_db(job_dict, DATABASE)
+                # 5) Start them without waiting for the whole batch to finish.
+                for job in filtered_jobs:
+                    job_id = str(job.get("job_id"))
+                    reserve_job_slot(job, DATABASE)
+                    task = asyncio.create_task(process_job(job))
+                    active_tasks[task] = job_id
+                    print(f"[main_loop] Started job_id={job_id}; active jobs={len(active_tasks)}.")
             else:
                 if not in_queue_jobs:
                     print("[main_loop] No new jobs in queue.")
                 elif available_slots <= 0:
-                    print(f"[main_loop] All {NUM_ASR_THREADS} slots are busy with transcribing jobs.")
+                    print(f"[main_loop] All {NUM_ASR_THREADS} slots are busy with active/transcribing jobs.")
                 else:
                     print("[main_loop] No jobs matching filter criteria.")
 
